@@ -7,11 +7,11 @@ public class CameraHeadBob : MonoBehaviour
 
     [Header("Bobbing Settings")]
     public Transform playerCapsule;        // Drag your PlayerCapsule here
-    public float walkBobSpeed = 14f;
-    public float walkBobAmount = 0.05f;
-    public float runBobSpeed = 20f;
-    public float runBobAmount = 0.12f;
-    public float sprintThreshold = 5.0f;   // Speed required to trigger run bob
+    public float walkBobSpeed = 7.5f;      // Natural walking stride (~1.2 steps/sec)
+    public float walkBobAmount = 0.025f;   // Subtle vertical dip
+    public float runBobSpeed = 11.5f;      // Sprinting cadence
+    public float runBobAmount = 0.055f;    // Heavier sprint weight
+    public float sprintThreshold = 4.5f;   // Speed required to trigger run bob
 
     private float timer = 0f;
 
@@ -19,7 +19,6 @@ public class CameraHeadBob : MonoBehaviour
     {
         originalLocalPos = transform.localPosition;
         
-        // Auto-find character controller if not manually linked
         if (playerCapsule != null)
             characterController = playerCapsule.GetComponent<CharacterController>();
     }
@@ -28,29 +27,32 @@ public class CameraHeadBob : MonoBehaviour
     {
         if (playerCapsule == null || characterController == null) return;
 
-        // Check if player is moving on the ground
-        bool isMoving = characterController.isGrounded && characterController.velocity.magnitude > 0.1f;
-        bool isRunning = characterController.velocity.magnitude > sprintThreshold;
+        // Ignore vertical falling velocity so jumping doesn't trigger rapid bobbing
+        Vector3 horizontalVelocity = new Vector3(characterController.velocity.x, 0f, characterController.velocity.z);
+        float speed = horizontalVelocity.magnitude;
+
+        bool isMoving = characterController.isGrounded && speed > 0.2f;
+        bool isRunning = speed > sprintThreshold;
 
         if (isMoving)
         {
-            // Choose speed and intensity based on walking vs running
-            float currentSpeed = isRunning ? runBobSpeed : walkBobSpeed;
-            float currentAmount = isRunning ? runBobAmount : walkBobAmount;
+            float targetBobSpeed = isRunning ? runBobSpeed : walkBobSpeed;
+            float targetBobAmount = isRunning ? runBobAmount : walkBobAmount;
 
-            timer += Time.deltaTime * currentSpeed;
+            timer += Time.deltaTime * targetBobSpeed;
 
-            // Apply sine wave bobbing to Y (height) and X (side-to-side sway)
-            float targetX = originalLocalPos.x + (Mathf.Cos(timer * 0.5f) * currentAmount * 0.5f);
-            float targetY = originalLocalPos.y + (Mathf.Sin(timer) * currentAmount);
+            // Gentle figure-eight sway: vertical dip on every step, slight side sway every two steps
+            float targetX = originalLocalPos.x + (Mathf.Cos(timer * 0.5f) * targetBobAmount * 0.6f);
+            float targetY = originalLocalPos.y + (Mathf.Sin(timer) * targetBobAmount);
 
-            transform.localPosition = new Vector3(targetX, targetY, originalLocalPos.z);
+            // Smoothly interpolate so transitions between walk, sprint, and stop never snap
+            Vector3 targetPos = new Vector3(targetX, targetY, originalLocalPos.z);
+            transform.localPosition = Vector3.Lerp(transform.localPosition, targetPos, Time.deltaTime * 12f);
         }
         else
         {
-            // Smoothly return camera to center when standing still
             timer = 0f;
-            transform.localPosition = Vector3.Lerp(transform.localPosition, originalLocalPos, Time.deltaTime * 6f);
+            transform.localPosition = Vector3.Lerp(transform.localPosition, originalLocalPos, Time.deltaTime * 8f);
         }
     }
 }

@@ -2,7 +2,6 @@ using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine.UI;
-using UnityEngine.SceneManagement;
 
 public class RookBossController : MonoBehaviour
 {
@@ -12,31 +11,53 @@ public class RookBossController : MonoBehaviour
     public Transform player;
     public Slider healthBarUI;
 
-    [Header("Combat Settings")]
-    public float marchSpeed = 4f;
-    public float chargeSpeed = 18f;
+    [Header("Combat & Horror Settings")]
+    public float chargeSpeed = 24f;
     public float tileInterval = 2f;
     public Material dangerTileMaterial;
+    public Light eyeGlowLight; // Optional: Assign red Point Light on the Rook's face
 
     private bool isActing = false;
     private bool isStaggered = false;
+    private float baseY;
     private List<GameObject> activeWarningTiles = new List<GameObject>();
 
     void Start()
     {
+        baseY = transform.position.y;
         currentHealth = maxHealth;
         if (healthBarUI != null)
         {
             healthBarUI.maxValue = maxHealth;
             healthBarUI.value = currentHealth;
         }
+
+        if (player == null)
+        {
+            GameObject pObj = GameObject.FindGameObjectWithTag("Player");
+            if (pObj != null) player = pObj.transform;
+        }
+
+        if (eyeGlowLight != null) eyeGlowLight.intensity = 0.5f;
     }
 
     void Update()
     {
-        if (isActing || isStaggered || player == null) return;
+        if (player == null) return;
 
-        // Ominously decide next boss action based on player distance/alignment
+        // Constantly track player rotation smoothly when not in the middle of a fast charge
+        if (!isActing && !isStaggered)
+        {
+            Vector3 lookDirection = (player.position - transform.position);
+            lookDirection.y = 0; // Keep rotation locked flat on the floor plane
+            if (lookDirection != Vector3.zero)
+            {
+                Quaternion targetRotation = Quaternion.LookRotation(lookDirection);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 6f);
+            }
+        }
+
+        if (isActing || isStaggered) return;
         StartCoroutine(BossDecisionRoutine());
     }
 
@@ -44,58 +65,111 @@ public class RookBossController : MonoBehaviour
     {
         isActing = true;
 
-        // 1. Ominous slow march closer to player
+        // 1. Heavy, mechanical lurch toward player
         Vector3 dirToPlayer = (player.position - transform.position);
         if (Mathf.Abs(dirToPlayer.x) > Mathf.Abs(dirToPlayer.z))
         {
-            yield return StartCoroutine(StepForward(new Vector3(Mathf.Sign(dirToPlayer.x), 0, 0)));
+            yield return StartCoroutine(HeavyStepForward(new Vector3(Mathf.Sign(dirToPlayer.x), 0, 0)));
         }
         else
         {
-            yield return StartCoroutine(StepForward(new Vector3(0, 0, Mathf.Sign(dirToPlayer.z))));
+            yield return StartCoroutine(HeavyStepForward(new Vector3(0, 0, Mathf.Sign(dirToPlayer.z))));
         }
 
-        // 2. Check if aligned for a devastating straight-line charge
+        // 2. Check if aligned on a rank or file for a lethal charge
         Vector3 diff = player.position - transform.position;
-        if (Mathf.Abs(diff.x) < 0.8f || Mathf.Abs(diff.z) < 0.8f)
+        if (Mathf.Abs(diff.x) < 1.0f || Mathf.Abs(diff.z) < 1.0f)
         {
-            Vector3 chargeDir = Mathf.Abs(diff.x) < 0.8f ? new Vector3(0, 0, Mathf.Sign(diff.z)) : new Vector3(Mathf.Sign(diff.x), 0, 0);
-            yield return StartCoroutine(ExecuteBossCharge(chargeDir));
+            Vector3 chargeDir = Mathf.Abs(diff.x) < 1.0f 
+                ? new Vector3(0, 0, Mathf.Sign(diff.z)) 
+                : new Vector3(Mathf.Sign(diff.x), 0, 0);
+            yield return StartCoroutine(ExecuteLoomingCharge(chargeDir));
         }
 
-        yield return new WaitForSeconds(1.0f);
+        yield return new WaitForSeconds(Random.Range(0.45f, 0.95f));
         isActing = false;
     }
 
-    IEnumerator StepForward(Vector3 dir)
+    IEnumerator HeavyStepForward(Vector3 dir)
     {
         Vector3 startPos = transform.position;
         Vector3 targetPos = startPos + (dir * tileInterval);
+        float duration = 0.22f;
         float elapsed = 0f;
 
-        while (elapsed < 0.4f)
+        while (elapsed < duration)
         {
-            transform.position = Vector3.Lerp(startPos, targetPos, elapsed / 0.4f);
+            float t = elapsed / duration;
+            float smoothT = t * t * (3f - 2f * t);
+            float hop = Mathf.Sin(t * Mathf.PI) * 0.25f;
+
+            Vector3 pos = Vector3.Lerp(startPos, targetPos, smoothT);
+            pos.y = baseY + hop;
+            transform.position = pos;
+
             elapsed += Time.deltaTime;
             yield return null;
         }
+
+        targetPos.y = baseY;
         transform.position = targetPos;
+
+        float dist = Vector3.Distance(transform.position, player.position);
+        if (dist < 16f)
+        {
+            float proximity = 1f - (dist / 16f);
+            CameraShake.TriggerShake(0.12f, 0.08f * proximity);
+        }
     }
 
-    IEnumerator ExecuteBossCharge(Vector3 dir)
+    IEnumerator ExecuteLoomingCharge(Vector3 dir)
     {
-        // Telegraph danger tiles
+        // Snap instantly to face the exact charge direction
+        transform.rotation = Quaternion.LookRotation(dir);
         SpawnDangerTiles(dir);
-        yield return new WaitForSeconds(0.8f); // Windup warning
+
+        if (eyeGlowLight != null) eyeGlowLight.intensity = 6f;
+
+        // 1. Rise ominously and tremble violently (0.65s)
+        Vector3 groundPos = transform.position;
+        float riseDuration = 0.65f;
+        float elapsed = 0f;
+
+        while (elapsed < riseDuration)
+        {
+            float progress = elapsed / riseDuration;
+            float lift = Mathf.Lerp(0f, 1.3f, progress);
+            Vector3 tremor = Random.insideUnitSphere * (0.08f * progress);
+            tremor.y = 0f;
+
+            transform.position = groundPos + Vector3.up * lift + tremor;
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        // 2. Guillotine slam down onto the board (0.12s)
+        float slamDuration = 0.12f;
+        elapsed = 0f;
+        Vector3 peakPos = transform.position;
+
+        while (elapsed < slamDuration)
+        {
+            transform.position = Vector3.Lerp(peakPos, groundPos, elapsed / slamDuration);
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+        transform.position = groundPos;
+        CameraShake.TriggerShake(0.22f, 0.18f);
         ClearDangerTiles();
 
+        // 3. Relentless high-speed charge
         float travelTime = 0f;
         bool hitWall = false;
         bool caughtPlayer = false;
 
         while (travelTime < 1.5f)
         {
-            if (Physics.Raycast(transform.position + Vector3.up, dir, 1.2f))
+            if (Physics.SphereCast(transform.position + Vector3.up, 0.6f, dir, out RaycastHit hit, 1.2f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
             {
                 hitWall = true;
                 break;
@@ -112,44 +186,46 @@ public class RookBossController : MonoBehaviour
             yield return null;
         }
 
+        if (eyeGlowLight != null) eyeGlowLight.intensity = 0.5f;
+
         if (caughtPlayer)
         {
-            SceneManager.LoadScene(SceneManager.GetActiveScene().name);
-            yield break;
+            PlayerHealth hp = player.GetComponent<PlayerHealth>();
+            if (hp != null) hp.TakeDamage(1);
         }
 
-        // If it hit a wall, it enters a Stagger State (Boss Weak Point Window)
         if (hitWall)
         {
             isStaggered = true;
-            Debug.Log("Boss slammed into the wall! Staggered for 2.5 seconds—attack now!");
-            
-            // Visual stagger feedback (shake slightly)
+            CameraShake.TriggerShake(0.4f, 0.28f);
+
+            Quaternion normalRot = transform.rotation;
+            transform.rotation = normalRot * Quaternion.Euler(12f, 0f, 0f);
+
             float staggerTimer = 0f;
             Vector3 wallPos = transform.position;
             while (staggerTimer < 2.5f)
             {
-                transform.position = wallPos + Random.insideUnitSphere * 0.05f;
+                transform.position = wallPos + Random.insideUnitSphere * 0.04f;
                 staggerTimer += Time.deltaTime;
                 yield return null;
             }
+
             transform.position = wallPos;
+            transform.rotation = normalRot;
             isStaggered = false;
         }
     }
 
     public void TakeDamage(int damage)
     {
-        if (!isStaggered) return; // Only take damage during stagger window!
+        if (!isStaggered) return;
 
         currentHealth -= damage;
         if (healthBarUI != null) healthBarUI.value = currentHealth;
 
-        Debug.Log($"Boss hit! Current Health: {currentHealth}");
-
         if (currentHealth <= 0)
         {
-            Debug.Log("Checkmate. Boss Defeated.");
             Destroy(gameObject);
         }
     }
