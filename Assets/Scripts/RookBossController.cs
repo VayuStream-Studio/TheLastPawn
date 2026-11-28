@@ -369,6 +369,7 @@ public class RookBossController : MonoBehaviour
         {
             isStaggered = true;
             CameraShake.TriggerShake(0.4f, 0.28f);
+            GetComponent<RookTendrils>()?.TriggerStaggerThrash(2.5f); // <-- Whip tendrils out!
 
             Quaternion normalRot = transform.rotation;
             transform.rotation = normalRot * Quaternion.Euler(12f, 0f, 0f);
